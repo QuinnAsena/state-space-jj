@@ -8,6 +8,24 @@ str(sunfish_pollen)
 # Needs checking for colnames to remove
 colnames(sunfish_pollen)
 
+# Names list in email
+# aquatic_spp <- c(
+# "Brasenia", "Nuphar",
+# "Nymphaea", "Nymphaea celluata", 
+# "Potamogeton","Myriophyllum", 
+# "C.stolon")
+
+# Matching names
+# What to do with SC0, Os.Ca?
+aquatic_spp <- c(
+  "Brasenia", "Nuphar",
+  "Nym", "Nym.cell", 
+  "Potamoge","Myrica", 
+  "C.stolon", "Botrich", "Botrioc")
+
+colnames(sunfish_pollen)[which(colnames(sunfish_pollen) %in% aquatic_spp)]
+sum(colnames(sunfish_pollen) %in% aquatic_spp)
+
 # clip age
 sunfish_pollen <- sunfish_pollen |>
   filter(Age >= 2374 & Age <= 8092)
@@ -19,13 +37,16 @@ tail(sunfish_pollen)
 # "Botrich", "Botrioc"
 
 # separate P.strobus for target
-# Lerge other pine with 'other'
-
+# Merge other pine with 'other'
+# Tried separating P.strobus, but there are lots of counts of otheer pine spp
+# other pines create a spike in 'other'
 # check which spp to harmonize
 # Make sure, stringr::str_detect(variablename, "Pinus.*"), "Pinus") matches colnames
 sunfish_spp_long <- pivot_longer(sunfish_pollen, cols = -Age, names_to = "variablename") |>
-  mutate(variablename = replace(variablename, stringr::str_detect(variablename, "Pinus.*"), "Pinus"),
-         variablename = replace(variablename, stringr::str_detect(variablename, "Acer*"), "Acer")) |>
+#  mutate(variablename = replace(variablename, stringr::str_detect(variablename, "P.diplo*"), "Pinus")) |> 
+  mutate(variablename = replace(variablename, stringr::str_detect(variablename, "P.diplo*|P.strobu"), "Pinus")) |> 
+#  mutate(variablename = replace(variablename, stringr::str_detect(variablename, "P.diplo*"), "Pinus"),
+#         variablename = replace(variablename, stringr::str_detect(variablename, "Acer*"), "Acer")) |>
   group_by(variablename, Age) |>
   summarise(value = sum(value), .groups = 'keep')
 
@@ -36,7 +57,8 @@ sunfish_target_spp <- sunfish_spp_long |>
 
 # Group all other spp
 sunfish_other <- sunfish_spp_long |>
-  filter(!variablename %in% c("Pinus", "Tsuga", "Fagus", "Quercus", "Betula")) |>
+  filter(!variablename %in% c("Pinus", "Tsuga", "Fagus", "Quercus", "Betula",
+                              aquatic_spp)) |>
   mutate(variablename = "other") |>
   group_by(variablename, Age) |>
   summarise(value = sum(value), .groups='keep')
