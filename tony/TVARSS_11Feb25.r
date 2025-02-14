@@ -32,7 +32,7 @@
 
 require("GenSA")
 
-TVARSS <- function(X, p = 1, ME = NULL, U = NULL, initial.points = "stationary", b0.start = NA, b.start = array(NA, dim = p), se.start = NA, su.start = 0.01, sb0.start = .05, sb.start = array(0.05, dim = p), c.start = if(is.null(U)) NULL else array(NA, dim=dim(U)[2]), d.start = if(is.null(U)) NULL else array(NA, dim=dim(U)[2]), b0.fixed = NA, b.fixed = array(NA, dim = p), se.fixed = NA, su.fixed = NA, sb0.fixed = NA, sb.fixed = array(NA, dim = p), c.fixed = if(is.null(U)) NULL else array(NA, dim=dim(U)[2]), d.fixed = if(is.null(U)) NULL else array(0, dim=dim(U)[2]), Tsamplefract = .9, annealing = F, show.count = 10^10, show.fig = T, method = "Nelder-Mead", maxit.BFGS = 10^4, maxit.SANN = 10^2, optim.BFGS.control = NULL, optim.SANN.control = NULL) {
+TVARSS <- function(X, p = 1, ME = NULL, U = NULL, initial.points = "stationary", b0.start = NA, b.start = array(NA, dim = p), se.start = NA, su.start = 0.01, sb0.start = .05, sb.start = array(0.05, dim = p), c.start = if(is.null(U)) NULL else array(0, dim=dim(U)[2]), d.start = if(is.null(U)) NULL else array(0, dim=dim(U)[2]), b0.fixed = NA, b.fixed = array(NA, dim = p), se.fixed = NA, su.fixed = NA, sb0.fixed = NA, sb.fixed = array(NA, dim = p), c.fixed = if(is.null(U)) NULL else array(NA, dim=dim(U)[2]), d.fixed = if(is.null(U)) NULL else array(0, dim=dim(U)[2]), Tsamplefract = .9, annealing = F, show.count = 10^10, show.fig = T, method = "Nelder-Mead", maxit.BFGS = 10^4, maxit.SANN = 10^2, optim.BFGS.control = NULL, optim.SANN.control = NULL) {
 	
 	require(GenSA)
 	
@@ -276,7 +276,7 @@ TVARSS <- function(X, p = 1, ME = NULL, U = NULL, initial.points = "stationary",
 	X <- as.matrix(X)
 	if(!is.null(U)) {
 		U <- as.matrix(U)
-		nu <- dim(U)[2]
+		nu <- ncol(U)
 	}
 	
 	if (is.null(ME)) {
@@ -294,8 +294,8 @@ TVARSS <- function(X, p = 1, ME = NULL, U = NULL, initial.points = "stationary",
 	if(length(sb.start) != p) stop("The length of sb.start must be p.")
 
 	ar.init <- arima(X, xreg = U, order = c(p, 0, 0))
-	b0.init <- ar.init$coef[p+1]
 	b.init <- ar.init$coef[1:p]
+	b0.init <- ar.init$coef[p+1]
 	s2 <- ar.init$sigma2
 	se.init <- (s2/2)^.5
 	su.init <- (s2/2)^.5
@@ -305,9 +305,9 @@ TVARSS <- function(X, p = 1, ME = NULL, U = NULL, initial.points = "stationary",
 		if(any(is.na(c.fixed))){
 			#c.init <- ar.init$coef[(p+2):(p+1+nu)]/(1-sum(b.init))
 			c.init <- ar.init$coef[(p+2):(p+1+nu)]
-			d.init <- rep(0,nu)
+			d.init <- 0 * ar.init$coef[(p+2):(p+1+nu)]
 		}else{
-			c.init <- rep(0,nu)
+			c.init <- 0 * ar.init$coef[(p+2):(p+1+nu)]
 			d.init <- ar.init$coef[(p+2):(p+1+nu)]
 		}
 	}else{
@@ -913,3 +913,50 @@ simulateTS <- function(B, B0, C, D, X0, U, se, su=0, break.times){
 	return(data.frame(time = 1:t, X = X, meanX = meanX))
 }
 
+# simple code for producing a list of P-values from LRTs
+P_indep_vars_TVARSS <- function(mod){
+	out <- data.frame(var = colnames(mod$U))
+	if(ncol(mod$U) == 1){
+		mod0 <- TVARSS(X = mod$X, ME = mod$ME, p = mod$p, Tsamplefract = .9, show.fig = T, annealing = F,
+			initial.points = "stationary",
+			su.fixed = mod$su.fixed,
+			sb0.fixed = mod$sb0.fixed,
+			sb.fixed = mod$sb.fixed,
+			b.start = mod$b,
+			b0.start = mod$b0	
+			)
+		dev <- 2*(mod$logLik - mod0$logLik)
+		P <- pchisq(dev, df = 1, lower.tail = F)
+		if(!is.null(mod$c)) out$val[1] <- mod$c[1]
+		if(!is.null(mod$d)) out$val[1] <- mod$d[1]
+		out$dev[1] <- dev
+		out$P[1] <- P	
+			
+	}else{
+		
+		for(i.col in 1:ncol(mod$U)){
+			mod0 <- TVARSS(X = mod$X, U = mod$U[,-i.col], ME = mod$ME, p = mod$p, Tsamplefract = .9, show.fig = T, annealing = F,
+				initial.points = "stationary",
+				su.fixed = mod$su.fixed,
+				c.fixed = mod$c.fixed[-i.col],
+				d.fixed = mod$d.fixed[-i.col],
+				sb0.fixed = mod$sb0.fixed,
+				sb.fixed = mod$sb.fixed,
+				c.start = if(any(!is.null(mod$c))) mod$c[-i.col] else rep(0,ncol(mod$U) - 1),
+				d.start = if(any(!is.null(mod$d))) mod$d[-i.col] else rep(0,ncol(mod$U) - 1),
+				b.start = mod$b,
+				b0.start = mod$b0	
+				)
+			dev <- 2*(mod$logLik - mod0$logLik)
+			P <- pchisq(dev, df = 1, lower.tail = F)
+			if(!is.null(mod$c)) out$val[i.col] <- mod$c[i.col]
+			if(!is.null(mod$d)) out$val[i.col] <- mod$d[i.col]
+			out$dev[i.col] <- dev
+			out$P[i.col] <- P		
+		}
+	}
+	df <- out[,-1]
+	rownames(df) <- out[,1]
+
+	return(df)
+}

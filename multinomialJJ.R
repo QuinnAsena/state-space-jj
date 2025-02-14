@@ -2,11 +2,17 @@ if (!require("pacman")) install.packages("pacman", repos="http://cran.r-project.
 pacman::p_load(tidyverse, multinomialTS, forecast, mgcv)
 
 sunfish_pollen <- read.csv("./data/Sunfish_pollen_rioja_2.csv")
+sunfish_pollen_rds <- readRDS("./data/sunfish_counts_with_dates.rds")
+
 sunfish_X <- read.csv("./data/Sunfish_dataset.csv")
+
+sunfish_pollen <- sunfish_pollen[-1]
+rowSums(sunfish_pollen)
 
 str(sunfish_pollen)
 # Needs checking for colnames to remove
 colnames(sunfish_pollen)
+colnames(sunfish_pollen_rds)
 
 # Names list in email
 # aquatic_spp <- c(
@@ -33,16 +39,11 @@ sunfish_pollen <- sunfish_pollen |>
 head(sunfish_pollen)
 tail(sunfish_pollen)
 
-# Throw out:
-# "Botrich", "Botrioc"
+sunfish_pollen_test <- as_tibble(sunfish_pollen) |>
+  select(P.strobu, P.diplo, Pinus) |>
+  mutate(P.strobu_prop = P.strobu + (P.strobu / Pinus),
+         P.diplo_prop = P.diplo + (P.diplo / Pinus))
 
-# separate P.strobus for target
-# Merge other pine with 'other'
-# Tried separating P.strobus, but there are lots of counts of otheer pine spp
-# other pines create a spike in 'other'
-# check which spp to harmonize
-# P.strobus with Pinus, P.diplo with other
-# Make sure, stringr::str_detect(variablename, "Pinus.*"), "Pinus") matches colnames
 sunfish_spp_long <- pivot_longer(sunfish_pollen, cols = -Age, names_to = "variablename") |>
 #  mutate(variablename = replace(variablename, stringr::str_detect(variablename, "P.diplo*"), "Pinus")) |> 
 #  mutate(variablename = replace(variablename, stringr::str_detect(variablename, "P.diplo*|P.strobu"), "Pinus")) |> 
