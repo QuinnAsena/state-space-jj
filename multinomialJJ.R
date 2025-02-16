@@ -1,21 +1,22 @@
+# Data wrangling ---------------------------------------------------------
+
 if (!require("pacman")) install.packages("pacman", repos="http://cran.r-project.org")
 pacman::p_load(tidyverse, multinomialTS, forecast, mgcv)
 
 sunfish_pollen <- read_csv("./data/Sunfish_585_pollen_counts_bchron062722B_cleaned.csv")
-sunfish_rioja_age <- read_csv("./data/Sunfish_pollen_rioja_2.csv") 
+sunfish_combined <- read_csv("./data/Sunfish_dataset.csv")
+sunfish_rioja <- read_csv("./data/Sunfish_pollen_rioja_2.csv")
 sunfish_ll <- read_csv("./data/Sunfish_LL_Recon_Feb22.csv")
 ns_temp <- read_csv("./data/Shuman24_NS_Temperatures.csv")
 isotopes <- read_csv("./data/isotope_Kalmen_smoother_output.csv")
 
 dim(sunfish_pollen)
-dim(sunfish_rioja_age)
+dim(sunfish_rioja)
 
 # CHECK THAT THIS IS THE CORRECT AGE MODEL
-sunfish_pollen$Age.bchron062722B <- sunfish_rioja_age$Age
-
+sunfish_pollen$age <- sunfish_rioja$Age
 
 colnames(sunfish_pollen)
-
 sunfish_pollen_only <- sunfish_pollen[-c(1:8)]
 ncol(sunfish_pollen_only)
 colSums(sunfish_pollen_only)
@@ -38,10 +39,9 @@ colSums(sunfish_pollen_only[ ,spp_remove])
 
 # clip age
 sunfish_pollen_clean <- sunfish_pollen |>
-  select(-c(spp_remove, DepthCM.Vania, Depth.predict,
-            `_2.5`, `_10`, `_90`, `_975`)) |>
-  rename("depth" = "Depth.Correct",
-         "age" = "Age.bchron062722B") |> 
+  select(-c(all_of(spp_remove), DepthCM.Vania, Depth.predict,
+            Age.bchron062722B, `_2.5`, `_10`, `_90`, `_975`)) |>
+  rename("depth" = "Depth.Correct") |> 
   filter(age >= 2374 & age <= 8092) # Clip to age-span of isotopes
 
 head(sunfish_pollen_clean)
@@ -62,11 +62,13 @@ sum(colSums(sunfish_pollen_assigned[ ,c("P.strobu", "P.diplo")]))
 colnames(sunfish_pollen_assigned)
 
 
-sunfish_spp_long <- pivot_longer(sunfish_pollen_assigned, cols = -c(age, depth), names_to = "variablename")
+sunfish_spp_long <- pivot_longer(sunfish_pollen_assigned, cols = -c(age, depth),
+                                 names_to = "variablename")
 #  mutate(variablename = replace(variablename, stringr::str_detect(variablename, "P.diplo*"), "Pinus")) |> 
 #  group_by(variablename, age) |>
 #  summarise(value = sum(value), .groups = 'keep')
 
+# P.diplo now being aggregated with other
 target_spp <- c("P.strobu", "Tsuga", "Fagus", "Quercus", "Betula")
 colSums(sunfish_pollen_assigned[ ,target_spp])
 colSums(sunfish_pollen_assigned[, !colnames(sunfish_pollen_assigned) %in% c(target_spp, "age", "depth"), drop = FALSE])
@@ -76,7 +78,6 @@ colSums(sunfish_pollen_assigned[, !colnames(sunfish_pollen_assigned) %in% c(targ
 # Pull out target species
 sunfish_target_spp <- sunfish_spp_long |>
   filter(variablename %in% target_spp)
-# filter(sunfish_spp_long, grepl("Betula*|Fagus*|Quercus*|Tsuga", variablename))
 
 # Group all other spp
 sunfish_other <- sunfish_spp_long |>
@@ -95,10 +96,10 @@ bind_rows(sunfish_other, sunfish_target_spp) |>
     facet_wrap(~ variablename, scales = "free")
 
 # Stack and pivot to wide
-# arrange from youngest to oldest
+# arrange from oldest to yongest
 sunfish_spp_wide <- bind_rows(sunfish_other, sunfish_target_spp) |>
   pivot_wider(id_cols = age, names_from = variablename, values_from = value) |>
-  arrange(age)
+  arrange(desc(age))
 
 # Create bins
 bin_width <- 100
@@ -114,118 +115,134 @@ sunfish_bins <-
 # Check if data fall within a bin and need to be summed
 diff(sunfish_bins) # bin 22
 
-
 nrow(sunfish_spp_wide)
 
 sunfish_spp_binned <- bind_cols(bins = sunfish_bins, sunfish_spp_wide) |>
   group_by(bins) |> # Group the data by the bins so that we calculate per time bin
-  summarise(age = mean(age, na.rm = T), # the center of the bin
-            across(!age, mean))
-
+  summarise(across(c(other, all_of(target_spp)), sum, na.rm = TRUE),
+            age = mean(age, na.rm = TRUE)) |> 
+              arrange(desc(age))
+            
 # lost one row to binning, not bad
 nrow(sunfish_spp_binned)
 
-# Turning to covariates:
-sunfish_X <- sunfish_X |>
-  select(age, CHAR, LL, Hemlock_d13c, Beech_d13c, Temperature) |>
-  mutate(LL = -LL) |> # Reverse LL so that negative values are lower lake level
-  arrange(age)
 
-# Quick plot of the data
-sunfish_X |> pivot_longer(-age) |>
-  ggplot(aes(x = age, y = value)) +
-  geom_point() +
-  geom_line() +
-  scale_x_reverse() +
-  facet_wrap(~ name, scales = "free")
+## Wrangling covariates --------------------------------------------------
 
-nrow(sunfish_X) # 42
+isotopes_clean <- isotopes |>
+  (\(x) split(x, x$var))() |>
+  map(\(df) df |>
+        select(-var) |>
+        rename_with(~ paste(unique(df$var), ., sep = "_"), starts_with("X"))
+  ) |>
+  reduce(full_join, by = "bin") |> 
+  select(bin, Beech_d13c_X.smoothed, Hemlock_d13c_X.smoothed) |> 
+  rename(
+    hem_d13 = Hemlock_d13c_X.smoothed,
+    beech_d13 = Beech_d13c_X.smoothed)
 
-sunfish_X_bins <-
+dim(isotopes_clean)
+print(isotopes_clean, n = 58)
+diff(isotopes_clean$bin)
+
+dim(sunfish_spp_binned)
+print(sunfish_spp_binned, n = 41)
+diff(sunfish_spp_binned$bins)
+
+ll_bins <-
   cut(
-    sunfish_X$age,
+    sunfish_ll$Age,
     breaks = seq(
-      from = min(sunfish_X$age),
-      to = max(sunfish_X$age + bin_width),
+      from = min(sunfish_spp_wide$age),
+      to = max(sunfish_spp_wide$age + bin_width),
       by = bin_width
     ), include.lowest = T, labels = F)
 
-# More bins will be averaged, will loose a few rows of data
-diff(sunfish_X_bins)
-# Will sort out during join with pollen
+ll_mean <- cbind(bins = ll_bins, sunfish_ll) |> 
+  drop_na(bins) |> 
+  select(bins, Lake_Level_Below_Modern) |> 
+  group_by(bins) |> 
+  summarise(mean_ll = mean(Lake_Level_Below_Modern)) |> 
+  arrange(desc(bins))
 
-sunfish_X_binned <- bind_cols(bins = sunfish_X_bins, sunfish_X) |>
-  group_by(bins) |>
-  summarise(across(everything(), mean))
+dim(ll_mean)
+head(ll_mean)
+tail(ll_mean)
+ll_mean$bins
+diff(ll_mean$bins)
 
-#lost 3 rows
-nrow(sunfish_X_binned)
+ns_temp_bins <-
+  cut(
+    ns_temp$Age,
+    breaks = seq(
+      from = min(sunfish_spp_wide$age),
+      to = max(sunfish_spp_wide$age + bin_width),
+      by = bin_width
+    ), include.lowest = T, labels = F)
 
-# Create continuous bins
-cont_bins <- tibble(bins = 1:sunfish_X_bins[length(sunfish_X_bins)])
+ns_temp_mean <- cbind(bins = ns_temp_bins, ns_temp) |> 
+  drop_na(bins) |> 
+  select(bins, Smean) |> 
+  group_by(bins) |> 
+  summarise(mean_ns_temp = mean(Smean)) |> 
+  arrange(desc(bins))
 
-sunfish_X_cont_bins <- full_join(cont_bins, sunfish_X_binned, by = "bins")
+dim(ns_temp_mean)
+head(ns_temp_mean)
+tail(ns_temp_mean)
+ns_temp_mean$bins
+diff(ns_temp_mean$bins)
 
-sunfish_X_cont_bins |> pivot_longer(-c(age, bins)) |>
+
+sunfish_all <- sunfish_spp_binned |> 
+  full_join(isotopes_clean, by = c("bins" = "bin")) |> 
+  full_join(ll_mean) |> 
+  full_join(ns_temp_mean) |> 
+  arrange(desc(bins))
+
+print(sunfish_all, n = 58)
+
+sunfish_all |>
+  select(bins, beech_d13, hem_d13, mean_ll, mean_ns_temp) |> 
+  pivot_longer(-bins) |>
   ggplot(aes(x = bins, y = value)) +
   geom_point() +
   geom_line() +
   scale_x_reverse() +
   facet_wrap(~ name, scales = "free")
 
+sunfish_all_interp <- sunfish_all |> 
+  mutate(across(c(beech_d13, hem_d13), forecast::na.interp))
 
-sunfish_xy_join <- full_join(sunfish_spp_binned, sunfish_X_cont_bins, by = "bins") |>
-  arrange(desc(bins))
-
-diff(sunfish_xy_join$bins)
-
-# Check empty bins
-sunfish_xy_join |>
-  select(age.x, age.y, bins, CHAR, LL, Hemlock_d13c, Beech_d13c, Temperature, Tsuga) |>
-  pivot_longer(-c(age.x, age.y, bins)) |>
-  ggplot(aes(x = bins, y = value)) +
-    geom_point() +
-    geom_line() +
-    scale_x_reverse() +
-    facet_wrap(~name, ncol = 1, scales = "free")
-
-# Linear interpolation of empty bins
-# Could fit with another method but gaps are small
-sunfish_xy_join_interp <- sunfish_xy_join |>
-  mutate(across(c(CHAR, LL, Hemlock_d13c, Beech_d13c, Temperature), forecast::na.interp))
-
-sunfish_xy_join_interp |>
-  select(age.x, age.y, bins, CHAR, LL, Hemlock_d13c, Beech_d13c, Temperature, Tsuga) |>
-  pivot_longer(-c(age.x, age.y, bins)) |>
+sunfish_all_interp |>
+  select(bins, beech_d13, hem_d13, mean_ll, mean_ns_temp) |> 
+  pivot_longer(-bins) |>
   ggplot(aes(x = bins, y = value)) +
   geom_point() +
   geom_line() +
   scale_x_reverse() +
-  facet_wrap(~name, ncol = 1, scales = "free")
-
+  facet_wrap(~ name, scales = "free")
 
 # X_ll <- data.frame(y = blanding_ll$LakeElev.cm.below.mod, x = blanding_ll$age)
 # X_ll_gam <- mgcv::gam(y ~ s(x, bs = "bs", k = nrow(X_ll)), method = "REML", data =  X_ll[nrow(X_ll):1, , drop = F])
 # pred <- predict(X_ll_gam, newdata = data.frame(x = sunfish_pollen$sunfish_years[63:69]))
 
-# set up Y
-Y <- sunfish_xy_join_interp |>
-  select(other, Betula, Fagus, Pinus, Quercus, Tsuga) |>
+
+# Set-up models ----------------------------------------------------------
+
+Y <- sunfish_all_interp |>
+  select(other, all_of(target_spp)) |>
   as.matrix()
 
 Tsample <- which(rowSums(Y) != 0)
 
 # set up X with temp
-X <- sunfish_xy_join_interp |>
-  select(CHAR, LL, Hemlock_d13c, Beech_d13c, Temperature) |>
+X <- sunfish_all_interp |>
+  select(beech_d13, hem_d13, mean_ll, mean_ns_temp) |>
   as.matrix() |>
   scale()
 
-# set up X without temp (temp is pollen inferred)
-X1 <- sunfish_xy_join_interp |>
-  select(CHAR, LL, Hemlock_d13c, Beech_d13c) |>
-  as.matrix() |>
-  scale()
+# TEMPERATURE IS POLLEN INFERRED, check final decision
 
 p <- ncol(X) + 1 # Number of independent variables plus intercept
 n <- ncol(Y)
@@ -277,8 +294,9 @@ mnTS_mod <- mnTS(Y = Y,
 # increase maxit.optim if the model needs a lot of time to fit.
 end_time <- Sys.time()
 end_time - start_time
+summary(mnTS_mod)
 
-
+## setup pairwise interactions -------------------------------------------
 
 c_idx <- t(combn(2:n, 2))
 mod_list <- vector(mode = "list", length = nrow(c_idx))
@@ -319,7 +337,7 @@ end_time - start_time
 saveRDS(mod_list, "./results/pairwise.rds")
 
 lapply(mod_list, \(x){x$C})
-lapply(mod_list, \(x){x$opt.convergence})
+sapply(mod_list, \(x){x$opt.convergence})
 
 mod_list <- readRDS("./results/pairwise.rds")
 
