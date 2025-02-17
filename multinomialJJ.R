@@ -1,21 +1,15 @@
 # Data wrangling ---------------------------------------------------------
 
 if (!require("pacman")) install.packages("pacman", repos="http://cran.r-project.org")
-pacman::p_load(tidyverse, multinomialTS, forecast, mgcv)
+pacman::p_load(tidyverse, multinomialTS, forecast, mgcv, future, furrr, ggtext, patchwork)
 
 sunfish_pollen <- read_csv("./data/Sunfish_585_pollen_counts_bchron062722B_cleaned.csv")
 sunfish_combined <- read_csv("./data/Sunfish_dataset.csv")
-sunfish_rioja <- read_csv("./data/Sunfish_pollen_rioja_2.csv")
 sunfish_ll <- read_csv("./data/Sunfish_LL_Recon_Feb22.csv")
 ns_temp <- read_csv("./data/Shuman24_NS_Temperatures.csv")
 isotopes <- read_csv("./data/isotope_Kalmen_smoother_output.csv")
 
 dim(sunfish_pollen)
-dim(sunfish_rioja)
-
-# CHECK THAT THIS IS THE CORRECT AGE MODEL
-sunfish_pollen$age <- sunfish_rioja$Age
-
 colnames(sunfish_pollen)
 sunfish_pollen_only <- sunfish_pollen[-c(1:8)]
 ncol(sunfish_pollen_only)
@@ -23,7 +17,7 @@ colSums(sunfish_pollen_only)
 rowSums(sunfish_pollen_only)
 
 # Remove spp with less than 5 count in whole core
-filter_5_names <- names(which(colSums(sunfish_pollen_only) <= 5))
+filter_5_names <- names(which(colSums(sunfish_pollen_only) <= 20))
 
 # Remove some aquatic/semi-aquatic spp as suggested
 aquatic_spp <- c(
@@ -40,15 +34,35 @@ colSums(sunfish_pollen_only[ ,spp_remove])
 # clip age
 sunfish_pollen_clean <- sunfish_pollen |>
   select(-c(all_of(spp_remove), DepthCM.Vania, Depth.predict,
-            Age.bchron062722B, `_2.5`, `_10`, `_90`, `_975`)) |>
+             `_2.5`, `_10`, `_90`, `_975`)) |>
   rename("depth" = "Depth.Correct") |> 
-  filter(age >= 2374 & age <= 8092) # Clip to age-span of isotopes
+  filter(depth >= 739 & depth <= 976) |> # Clip to age-span of isotopes
+  mutate(age = sunfish_combined$Age)
+  # filter(age >= 2374 & age <= 8092) |> # Clip to age-span of isotopes
+
+dim(sunfish_pollen_clean) 
+dim(sunfish_combined) 
+
+# Some minor inconsistencies in age-depth model likely due to repeatedly running Bchron without a seed
+# Ages replace with lates version (consistent with the one Tony used for isotopes) 
+
+sunfish_pollen_clean |> 
+  select(depth, Age.bchron062722B, age) |> 
+  head()
+
+sunfish_pollen_clean |> 
+  select(depth, Age.bchron062722B, age) |> 
+  tail()
+
+sunfish_pollen_clean <- sunfish_pollen_clean |> 
+  select(-Age.bchron062722B)
 
 head(sunfish_pollen_clean)
 tail(sunfish_pollen_clean)
 
 colSums(sunfish_pollen_clean[ ,c("Pinus", "P.strobu", "P.diplo")])
 
+# Distribute undifined pine counts between P.strobus and P.diplo based on their relative proportions
 sunfish_pollen_assigned <- sunfish_pollen_clean %>%
   mutate(
     total_pollen = P.strobu + P.diplo,
@@ -62,11 +76,33 @@ sum(colSums(sunfish_pollen_assigned[ ,c("P.strobu", "P.diplo")]))
 colnames(sunfish_pollen_assigned)
 
 
+## This section only to plot different species ---------------------------
+
+sunfish_pollen_selector <- which(colSums(sunfish_pollen_assigned) > 200)
+
+sunfish_pollen_assigned_long <- sunfish_pollen_assigned |> 
+  select(all_of(sunfish_pollen_selector)) |> 
+  pivot_longer(-c(age, depth))
+
+ggplot(sunfish_pollen_assigned_long, aes(x = age, y = value)) +
+  geom_area(colour = "grey90") +
+  geom_segment(data = sunfish_pollen_assigned_long,
+               aes(x = age, xend = age,
+               y = 0, yend = value), colour = "grey30", linewidth = 0.6) +
+  scale_x_reverse(breaks = scales::breaks_pretty(n = 6)) +
+  coord_flip() +
+  # ylim(0, 0.5) +
+  labs(y = "Pollen counts", x = "Time (ybp)") +
+  facet_wrap(~name,
+             nrow = 1) +
+  theme_minimal() +
+  theme(
+    text = element_text(size = 10)
+  )
+## sub-section end
+
 sunfish_spp_long <- pivot_longer(sunfish_pollen_assigned, cols = -c(age, depth),
                                  names_to = "variablename")
-#  mutate(variablename = replace(variablename, stringr::str_detect(variablename, "P.diplo*"), "Pinus")) |> 
-#  group_by(variablename, age) |>
-#  summarise(value = sum(value), .groups = 'keep')
 
 # P.diplo now being aggregated with other
 target_spp <- c("P.strobu", "Tsuga", "Fagus", "Quercus", "Betula")
@@ -86,14 +122,34 @@ sunfish_other <- sunfish_spp_long |>
   group_by(variablename, age, depth) |>
   summarise(value = sum(value), .groups='keep')
 
+sunfish_grouped_long <- bind_rows(sunfish_other, sunfish_target_spp) |> 
+  mutate(variablename = fct(variablename, levels = c("other", target_spp)))
+
 # Plot spp
-bind_rows(sunfish_other, sunfish_target_spp) |>
+sunfish_grouped_long |>
   arrange(age) |>
   ggplot(aes(x = age, y = value)) +
     geom_point() +
     geom_line() +
     scale_x_reverse() +
     facet_wrap(~ variablename, scales = "free")
+
+ggplot(sunfish_grouped_long, aes(x = age, y = value)) +
+  geom_area(colour = "grey90") +
+  geom_segment(data = sunfish_grouped_long,
+           aes(x = age, xend = age,
+           y = 0, yend = value), colour = "grey30", linewidth = 0.6) +
+  scale_x_reverse(breaks = scales::breaks_pretty(n = 6)) +
+  coord_flip() +
+  # ylim(0, 0.5) +
+  labs(y = "Pollen counts", x = "Time (ybp)") +
+  facet_wrap(~variablename,
+             nrow = 1) +
+  theme_minimal() +
+  theme(
+    text = element_text(size = 10),
+  )
+
 
 # Stack and pivot to wide
 # arrange from oldest to yongest
@@ -119,11 +175,12 @@ nrow(sunfish_spp_wide)
 
 sunfish_spp_binned <- bind_cols(bins = sunfish_bins, sunfish_spp_wide) |>
   group_by(bins) |> # Group the data by the bins so that we calculate per time bin
-  summarise(across(c(other, all_of(target_spp)), sum, na.rm = TRUE),
+  summarise(across(c(other, all_of(target_spp)), \(x) sum(x ,na.rm = TRUE)),
             age = mean(age, na.rm = TRUE)) |> 
               arrange(desc(age))
             
-# lost one row to binning, not bad
+# lost one row to binning if using rioja age
+# lost three rows using sunfish datasets age
 nrow(sunfish_spp_binned)
 
 
@@ -242,6 +299,8 @@ X <- sunfish_all_interp |>
   as.matrix() |>
   scale()
 
+matplot(X, type = 'l')
+
 # TEMPERATURE IS POLLEN INFERRED, check final decision
 
 p <- ncol(X) + 1 # Number of independent variables plus intercept
@@ -337,18 +396,218 @@ end_time - start_time
 saveRDS(mod_list, "./results/pairwise.rds")
 
 lapply(mod_list, \(x){x$C})
+lapply(mod_list, coef)
 sapply(mod_list, \(x){x$opt.convergence})
 
 mod_list <- readRDS("./results/pairwise.rds")
 
 mod_list[[5]]$C
 
-# tsuga:fagus
-# tsuga:betula
-# fagus:quercus
+# tsuga:fagus [[5]]
+# tsuga:betula [[7]]
+# fagus:quercus [[8]]
+# tsuga:quercus [[6]]
+# tsuga:pinus [[1]]
 
-# fagus:pinus
-# tsuga:quercus
-# tsuga:pinus
-# betula:pinus
-# betula:quercus
+# fagus:pinus [[2]]
+# betula:pinus [[4]]
+# betula:quercus [[10]]
+
+# betula:fagus [[9]]
+# quercus:pinus [[3]]
+
+# bootstrapping -----------------------------------------------------------
+
+# include no-interaction model in bootstrap
+# tsuga:fagus [[5]]
+# tsuga:betula [[7]]
+# fagus:quercus [[8]]
+# tsuga:quercus [[6]]
+# tsuga:pinus [[1]]
+
+start_time <- Sys.time()
+
+mods <- list(
+  no_int = mnTS_mod,
+  tf_int = mod_list[[5]],
+  tb_int = mod_list[[7]],
+  fq_int = mod_list[[8]],
+  tq_int = mod_list[[6]],
+  tp_int = mod_list[[1]]
+)
+
+lapply(mods, coef)
+
+future::plan(strategy = multisession, workers = length(mods))
+
+
+res <- furrr::future_map(mods, multinomialTS::boot.mnTS, rep = 1000,
+                         .options = furrr_options(seed = 1984))
+saveRDS(res, "./results/sunfish_mnts_bootstraps_1000.rds")
+end_time <- Sys.time()
+end_time - start_time
+
+
+## Bootstrap plotting B ---------------------------------------------------
+
+res <- readRDS("./results/sunfish_mnts_bootstraps_1000.rds")
+X_names_list <- c(
+  mean_ll ="Lake level (DBML (cm))",
+  beech_d13 = "Beech &delta;<sup>13</sup>C",
+  hem_d13 = "Hemlock &delta;<sup>13</sup>C",
+  mean_ns_temp ="Temperature"
+)
+
+mods_boot <- map(res, ~ {
+  as_tibble(.x[[2]]) |> 
+  pivot_longer(-c(logLik, opt.convergence))
+}) |> 
+  bind_rows(.id = "hyp") |> 
+  mutate(hyp = str_remove(hyp, pattern = '[[:digit:]]+'))
+
+mods_boot_68 <- mods_boot |> 
+#  filter(opt.convergence == 0) |> 
+  group_by(hyp, name) |> 
+  summarise(boot_mean = mean(value),
+            boot_sd = sd(value),
+            upper_68 = quantile(value, probs = 0.84),
+            lower_68 = quantile(value, probs = 0.16)) |> 
+  mutate(t_scores = boot_mean / boot_sd,
+         p_vals = 2 * pnorm(q = abs(t_scores), lower.tail = F),
+         sig = p_vals < 0.05)
+#
+
+mods_boot_table <- mods_boot_68 |> 
+  mutate(name = str_replace_all(name, 
+    pattern = "y1|y2|y3|y4|y5|y6", 
+    replacement = function(x) case_when(
+      x == "y1" ~ "Other",
+      x == "y2" ~ "P.strobu",
+      x == "y3" ~ "Tsuga",
+      x == "y4" ~ "Fagus",
+      x == "y5" ~ "Quercus",
+      x == "y6" ~ "Betula",
+      TRUE ~ x  # Keep other values unchanged
+    ))) |> 
+    filter(!str_detect(name, "v."))
+
+mods_boot_68_B <- mods_boot_68 |> 
+  filter(grepl(paste(names(X_names_list), collapse = "|"), name)) |> 
+  separate_wider_delim(cols = name, delim = ".", names = c("cov", "name")) |>
+  mutate(name = str_replace_all(name, 
+    pattern = "y2|y3|y4|y5|y6", 
+    replacement = function(x) case_when(
+      x == "y2" ~ "P.strobu",
+      x == "y3" ~ "Tsuga",
+      x == "y4" ~ "Fagus",
+      x == "y5" ~ "Quercus",
+      x == "y6" ~ "Betula",
+      TRUE ~ x  # Keep other values unchanged
+    )))
+
+mod_plots_B <- mods_boot_68_B |> 
+    (\(x) split(x, x$hyp))() |>
+      map(\(df) df |>
+        ggplot(aes(x = name, y = boot_mean, colour = as_factor(sig))) +
+          geom_point() +
+          geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.2) +
+          geom_errorbar(aes(ymin = lower_68, ymax = upper_68),
+                            width = .2, alpha = 0.5) +
+          scale_color_manual(name = "Significance", labels = c("> 0.05", "< 0.05"),
+                             values = c("#202020", "#d80000")) +
+          labs(x = "Taxa", y = "Coefficient", title = paste(unique(df$hyp))) +
+          facet_wrap(~ cov, labeller = as_labeller(X_names_list)) +
+          theme_bw() +
+          theme(
+            strip.text = element_markdown(size = 12),
+            strip.background = element_rect(fill = NA),
+            legend.position = "bottom",
+            axis.text = element_text(size = 10, angle = 90),
+            axis.title = element_text(size = 10),
+            legend.text = element_text(size = 8) 
+  )
+)
+
+reduce(mod_plots_B, `+`)
+
+## Bootstrap plotting C ---------------------------------------------------
+
+names_factor <- c(map2_vec(c("Other", target_spp), c("Other", target_spp), \(x, y) paste(x, y, sep = ".")), 
+c("Fagus.Quercus", "Quercus.Fagus", "Betula.Tsuga", "Tsuga.Betula", "Tsuga.Fagus", "Fagus.Tsuga"))
+
+
+mods_boot_68_C <- mods_boot_68 |> 
+  filter(!grepl(paste(c(names(X_names_list), "v."), collapse = "|"), name),
+         !name %in% c("y2", "y3", "y4", "y5", "y6")) |>
+  mutate(name = str_remove(name, "sp.")) |> 
+  # separate_wider_delim(cols = name, delim = ".", names = c("cov", "name")) |>
+  mutate(name = str_replace_all(name, 
+    pattern = "y1|y2|y3|y4|y5|y6", 
+    replacement = function(x) case_when(
+      x == "y1" ~ "Other",
+      x == "y2" ~ "P.strobu",
+      x == "y3" ~ "Tsuga",
+      x == "y4" ~ "Fagus",
+      x == "y5" ~ "Quercus",
+      x == "y6" ~ "Betula",
+      TRUE ~ x  # Keep other values unchanged
+    )),
+  name = fct(name, levels = names_factor))
+
+
+mod_plots_C <- mods_boot_68_C |> 
+    (\(x) split(x, x$hyp))() |>
+      map(\(df) df |>
+        ggplot(aes(x = name, y = boot_mean, colour = as_factor(sig))) +
+          geom_point() +
+          geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.2) +
+          geom_errorbar(aes(ymin = lower_68, ymax = upper_68),
+                            width = .2, alpha = 0.5) +
+          scale_color_manual(name = "Significance", labels = c("> 0.05", "< 0.05"),
+                             values = c("#202020", "#d80000")) +
+          labs(x = "Taxa", y = "Coefficient", title = paste(unique(df$hyp))) +
+          # facet_wrap(~ cov, labeller = as_labeller(X_names_list)) +
+          theme_bw() +
+          theme(
+            strip.text = element_markdown(size = 8),
+            strip.background = element_rect(fill = NA),
+            legend.position = "bottom",
+            axis.text = element_text(size = 8, angle = 90),
+            axis.title = element_text(size = 10),
+            legend.text = element_text(size = 8) 
+  )
+)
+
+reduce(mod_plots_C, `+`)
+
+
+
+
+
+
+
+
+ggplot(sunfish_grouped_long, aes(x = age, y = value)) +
+  geom_area(colour = "grey90") +
+  geom_segment(data = sunfish_grouped_long,
+           aes(x = age, xend = age,
+           y = 0, yend = value), colour = "grey30", linewidth = 0.6) +
+  scale_x_reverse(breaks = scales::breaks_pretty(n = 6)) +
+  coord_flip() +
+  # ylim(0, 0.5) +
+  labs(y = "Pollen counts", x = "Time (ybp)") +
+  facet_wrap(~variablename,
+             nrow = 1) +
+  theme_minimal() +
+  theme(
+    text = element_text(size = 10),
+  )
+
+sunfish_all_interp |>
+  select(bins, beech_d13, hem_d13, mean_ll, mean_ns_temp) |> 
+  pivot_longer(-bins) |>
+  ggplot(aes(x = bins, y = value)) +
+  geom_point() +
+  geom_line() +
+  scale_x_reverse() +
+  facet_wrap(~ name, nrow = 1, scales = "free")
