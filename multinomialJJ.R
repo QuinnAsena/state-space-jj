@@ -533,7 +533,9 @@ reduce(mod_plots_B, `+`)
 ## Bootstrap plotting C ---------------------------------------------------
 
 names_factor <- c(map2_vec(c("Other", target_spp), c("Other", target_spp), \(x, y) paste(x, y, sep = ".")), 
-c("Fagus.Quercus", "Quercus.Fagus", "Betula.Tsuga", "Tsuga.Betula", "Tsuga.Fagus", "Fagus.Tsuga"))
+c("Fagus.Quercus", "Quercus.Fagus", "Betula.Tsuga",
+  "Tsuga.Betula", "Tsuga.Fagus", "Fagus.Tsuga", 
+  "P.strobu.Tsuga", "Tsuga.P.strobu", "Tsuga.Quercus", "Quercus.Tsuga"))
 
 
 mods_boot_68_C <- mods_boot_68 |> 
@@ -581,27 +583,45 @@ mod_plots_C <- mods_boot_68_C |>
 reduce(mod_plots_C, `+`)
 
 
+# Plot testing ground ----------------------------------------------------
 
 
+sunfish_grouped_long_prop <- sunfish_grouped_long |> 
+  group_by(age) |> 
+    mutate(pollencount = sum(value, na.rm = TRUE)) |> 
+    group_by(variablename) |> 
+    mutate(prop = value / pollencount) 
+
+sunfish_all_interp
 
 
+colour_codes <- c(
+  Fagus = "#6B8E9D",
+  P.strobu = "#8DAA91",
+  Betula = "#D8A48F",
+  Tsuga = "#A68DA6",
+  Betula = "#D1C47F"
+)
 
-
-ggplot(sunfish_grouped_long, aes(x = age, y = value)) +
-  geom_area(colour = "grey90") +
-  geom_segment(data = sunfish_grouped_long,
-           aes(x = age, xend = age,
-           y = 0, yend = value), colour = "grey30", linewidth = 0.6) +
-  scale_x_reverse(breaks = scales::breaks_pretty(n = 6)) +
-  coord_flip() +
-  # ylim(0, 0.5) +
-  labs(y = "Pollen counts", x = "Time (ybp)") +
-  facet_wrap(~variablename,
-             nrow = 1) +
-  theme_minimal() +
+ggplot(sunfish_grouped_long_prop |> filter(variablename != "other"),
+       aes(x = age, y = prop, fill = variablename)) +
+  geom_area(position = "stack") +
+  scale_fill_manual(values = colour_codes) +
+  scale_x_reverse(breaks = scales::breaks_pretty(n = 6))  
+theme_minimal() +
   theme(
     text = element_text(size = 10),
   )
+
+ggplot(sunfish_grouped_long_prop |> filter(variablename != "other"),
+       aes(x = age, y = prop, colour = variablename)) +
+  geom_line() +
+  scale_colour_manual(values = colour_codes) +
+  scale_x_reverse(breaks = scales::breaks_pretty(n = 6)) +
+  theme_minimal() +
+    theme(
+      text = element_text(size = 10),
+    )
 
 sunfish_all_interp |>
   select(bins, beech_d13, hem_d13, mean_ll, mean_ns_temp) |> 
@@ -611,3 +631,20 @@ sunfish_all_interp |>
   geom_line() +
   scale_x_reverse() +
   facet_wrap(~ name, nrow = 1, scales = "free")
+
+ggplot(sunfish_grouped_long_prop, aes(x = age, y = prop)) +
+  geom_area(colour = "grey90") +
+  geom_segment(data = sunfish_grouped_long_prop,
+           aes(x = age, xend = age,
+           y = 0, yend = prop), colour = "grey30", linewidth = 0.6) +
+  scale_x_reverse(breaks = scales::breaks_pretty(n = 6)) +
+  # coord_flip() +
+  # ylim(0, 0.5) +
+  labs(y = "Pollen relative abundances", x = "Time (ybp)") +
+  facet_wrap(~variablename,
+             ncol = 1) +
+  theme_minimal() +
+  theme(
+    text = element_text(size = 10),
+  )
+
