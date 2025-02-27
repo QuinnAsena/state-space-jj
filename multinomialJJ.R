@@ -139,7 +139,7 @@ ggplot(sunfish_grouped_long, aes(x = age, y = value)) +
   geom_segment(data = sunfish_grouped_long,
            aes(x = age, xend = age,
            y = 0, yend = value), colour = "grey30", linewidth = 0.6) +
-  scale_x_reverse(breaks = scales::breaks_pretty(n = 6)) +
+  scale_x_reverse() +
   coord_flip() +
   # ylim(0, 0.5) +
   labs(y = "Pollen counts", x = "Time (ybp)") +
@@ -217,10 +217,16 @@ ll_bins <-
 
 ll_mean <- cbind(bins = ll_bins, sunfish_ll) |> 
   drop_na(bins) |> 
-  select(bins, Lake_Level_Below_Modern) |> 
+  select(bins, LakeElev.cm.below.mod) |> 
   group_by(bins) |> 
-  summarise(mean_ll = mean(Lake_Level_Below_Modern)) |> 
+  summarise(mean_ll = mean(LakeElev.cm.below.mod)) |> 
   arrange(desc(bins))
+
+
+ggplot(ll_mean, aes(x = bins, y = mean_ll)) + geom_line() + scale_x_reverse()
+###
+
+
 
 dim(ll_mean)
 head(ll_mean)
@@ -291,6 +297,9 @@ Y <- sunfish_all_interp |>
   select(other, all_of(target_spp)) |>
   as.matrix()
 
+# Y[ ,1] <- rowSums(Y[ , c("other", "P.strobu", "Fagus", "Quercus", "Betula")])
+# Y <- Y[ , c("other", "Tsuga")]
+
 Tsample <- which(rowSums(Y) != 0)
 
 # set up X with temp
@@ -342,7 +351,7 @@ C.fixed.diag[C.fixed.diag != 0] <- NA
 
 # Model with no interactions
 start_time <- Sys.time()
-mnTS_mod <- mnTS(Y = Y,
+mnTS_mod <- mnTS(Y = Y[which(rowSums(Y) != 0),],
                  X = X, Tsample = Tsample,
                  B0.start = B0.start, B0.fixed = B0.fixed,
                  B.start = B.start, B.fixed = B.fixed,
@@ -354,6 +363,7 @@ mnTS_mod <- mnTS(Y = Y,
 end_time <- Sys.time()
 end_time - start_time
 summary(mnTS_mod)
+
 
 ## setup pairwise interactions -------------------------------------------
 
@@ -374,7 +384,7 @@ for (idx in 1:nrow(c_idx)) {
 
   mnTS_mod_int <- tryCatch(
     {
-      multinomialTS::mnTS(Y = Y, X = X, Tsample = Tsample,
+      multinomialTS::mnTS(Y = Y[which(rowSums(Y) != 0),], X = X, Tsample = Tsample,
                           B0.start = mnTS_mod$B0, B0.fixed = B0.fixed,
                           B.start = mnTS_mod$B, B.fixed = B.fixed,
                           C.start = C.start, C.fixed = C.fixed,
@@ -437,6 +447,7 @@ mods <- list(
 )
 
 lapply(mods, coef)
+
 
 future::plan(strategy = multisession, workers = length(mods))
 
@@ -648,3 +659,35 @@ ggplot(sunfish_grouped_long_prop, aes(x = age, y = prop)) +
     text = element_text(size = 10),
   )
 
+
+
+sunfish_spp_binned_long <- sunfish_spp_binned |> 
+  pivot_longer(-c(bins, age))
+
+spp_bin_plot <- ggplot(sunfish_spp_binned_long, aes(x = bins, y = value)) +
+  geom_area(colour = "grey90") +
+  geom_segment(data = sunfish_spp_binned_long,
+           aes(x = bins, xend = bins,
+           y = 0, yend = value), colour = "grey30", linewidth = 0.6) +
+  scale_x_reverse() +
+  coord_flip() +
+  # ylim(0, 0.5) +
+  labs(y = "Pollen counts", x = "Time (ybp)") +
+  facet_wrap(~name,
+             nrow = 1) +
+  theme_minimal() +
+  theme(
+    text = element_text(size = 10),
+  )
+
+ll_plot <- ggplot(x |> select(bins, Lake_Level_Below_Modern ), aes(x = bins, y = Lake_Level_Below_Modern )) +
+  geom_point() +
+  geom_line() +
+  scale_x_reverse() +
+  coord_flip() +
+  theme_minimal() +
+  theme(
+    text = element_text(size = 10),
+  )
+
+spp_bin_plot + ll_plot + plot_layout(widths = c(.9, .1))

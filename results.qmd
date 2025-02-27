@@ -289,9 +289,9 @@ ll_bins <-
 
 ll_mean <- cbind(bins = ll_bins, sunfish_ll) |> 
   drop_na(bins) |> 
-  select(bins, Lake_Level_Below_Modern) |> 
+  select(bins, LakeElev.cm.below.mod) |> 
   group_by(bins) |> 
-  summarise(mean_ll = mean(Lake_Level_Below_Modern)) |> 
+  summarise(mean_ll = mean(LakeElev.cm.below.mod)) |> 
   arrange(desc(bins))
 
 ns_temp_bins <-
@@ -326,9 +326,9 @@ sunfish_all_cov_interp <- sunfish_all_cov |>
 
 ## B coefficients: driver-species/taxa relationships
 
-The driver-species relationships remain fairly consistent regadless of which species interactions are included. A couple of changes in the significance but the point estimates are much more important than the P-values.
+It is an interesting result that when interactions between _Tsuga_ and _P.strobus_ are included that the effect of temperature on _P.strobus_ decreases. This does make sense, since some of the influence is being attributed to the negative effect of pine on hemloc in the $C$ coefficients.
 
-Lake level is using positive values, the lake level _Tsuga_ effect is wetter conditions favouring _Tsuga_.
+The lake level _Tsuga_ effect is wetter conditions favouring _Tsuga_. The positive effect on _Pinus_ is not surprising looking at the data. I think the time-span of the data is having an impact here. I experimented with a model using the full almost 14,000 years-worth of pollen data, and lake level as the only covariate (lake level is the only covariate covering the whole span of the pollen data). The lake level effect becomes much more positive (around 0.7) on _Tsuga_ and dampens on _P.strobus_ (still positive, around 0.3). This was a bit of a rough exploration, but worth noting.
 
 :::{.panel-tabset}
 ```{r, results='asis'}
@@ -348,7 +348,7 @@ for (i in seq_along(mod_plots_B)) {
 
 ## C coefficients: species-species (taxa-taxa) relationships
 
-I'm not seeing a great deal of very strong interactions, this is the more challenging part for the model to estimate. Looks like there is a negative effect of _Tsuga_ on _Betula_.
+There is quite large error around the interactions, which is not surprising since estimating interactions is challenging. Nonetheless, there appears to be some interactions occuring.
 
 :::{.panel-tabset}
 ```{r, results='asis'}
