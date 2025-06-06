@@ -304,7 +304,7 @@ Tsample <- which(rowSums(Y) != 0)
 
 # set up X with temp
 X <- sunfish_all_interp |>
-  select(beech_d13, hem_d13, mean_ll, mean_ns_temp) |>
+  select(mean_ll, mean_ns_temp) |>
   as.matrix() |>
   scale()
 
@@ -508,11 +508,11 @@ mods_boot_68_B <- mods_boot_68 |>
   mutate(name = str_replace_all(name, 
     pattern = "y2|y3|y4|y5|y6", 
     replacement = function(x) case_when(
-      x == "y2" ~ "P.strobu",
-      x == "y3" ~ "Tsuga",
-      x == "y4" ~ "Fagus",
-      x == "y5" ~ "Quercus",
-      x == "y6" ~ "Betula",
+      x == "y2" ~ "_P.strobu_",
+      x == "y3" ~ "_Tsuga_",
+      x == "y4" ~ "_Fagus_",
+      x == "y5" ~ "_Quercus_",
+      x == "y6" ~ "_Betula_",
       TRUE ~ x  # Keep other values unchanged
     )))
 
@@ -533,13 +533,39 @@ mod_plots_B <- mods_boot_68_B |>
             strip.text = element_markdown(size = 12),
             strip.background = element_rect(fill = NA),
             legend.position = "bottom",
-            axis.text = element_text(size = 10, angle = 90),
+            axis.text = element_markdown(size = 10, angle = 90),
             axis.title = element_text(size = 10),
             legend.text = element_text(size = 8) 
   )
 )
 
 reduce(mod_plots_B, `+`)
+
+
+## David comments
+
+mod_plots_B <- mods_boot_68_B |> 
+    (\(x) split(x, x$hyp))() |>
+      map(\(df) df |>
+        ggplot(aes(x = name, y = boot_mean)) +
+          geom_point() +
+          geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.2) +
+          geom_errorbar(aes(ymin = lower_68, ymax = upper_68),
+                            width = .2, alpha = 0.5) +
+          labs(x = "Taxa", y = "Coefficient") +
+          facet_wrap(~ cov, labeller = as_labeller(X_names_list)) +
+          theme_bw() +
+          theme(
+            strip.text = element_markdown(size = 12),
+            strip.background = element_rect(fill = NA),
+            legend.position = "bottom",
+            axis.text = element_markdown(size = 10, angle = 90),
+            axis.title = element_text(size = 10),
+            legend.text = element_text(size = 8) 
+  )
+)
+
+ggsave(mod_plots_B$tp_int, filename = "./figures/tp_int.pdf", device = "pdf", height = 7, width = 6)
 
 ## Bootstrap plotting C ---------------------------------------------------
 
