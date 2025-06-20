@@ -463,9 +463,9 @@ end_time - start_time
 
 res <- readRDS("./results/sunfish_mnts_bootstraps_1000.rds")
 X_names_list <- c(
-  mean_ll ="Lake level (DBML (cm))",
-  beech_d13 = "Beech &delta;<sup>13</sup>C",
-  hem_d13 = "Hemlock &delta;<sup>13</sup>C",
+  mean_ll ="Lake level",
+  beech_d13 = "Beech <i>&delta;</i><sup>13</sup>C",
+  hem_d13 = "Hemlock <i>&delta;</i><sup>13</sup>C",
   mean_ns_temp ="Temperature"
 )
 
@@ -564,6 +564,7 @@ mod_plots_B <- mods_boot_68_B |>
             legend.text = element_text(size = 8) 
   )
 )
+names(mod_plots_B)
 
 ggsave(mod_plots_B$tp_int, filename = "./figures/tp_int.pdf", device = "pdf", height = 7, width = 6)
 
